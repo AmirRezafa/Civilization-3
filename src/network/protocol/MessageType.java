@@ -11,5 +11,6 @@ public enum MessageType {
     START_GAME_REQUEST,
     GAME_STARTED,
     END_TURN_REQUEST,
-    TURN_CHANGED
+    TURN_CHANGED,
+    CHAT_MESSAGE
 }

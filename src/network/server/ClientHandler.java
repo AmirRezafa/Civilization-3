@@ -1,5 +1,6 @@
 package network.server;
 
+import network.protocol.ChatMessage;
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
 import network.protocol.EndTurnRequest;
@@ -70,9 +71,23 @@ class ClientHandler implements Runnable {
             handleStartGameRequest();
         } else if (message instanceof EndTurnRequest) {
             handleEndTurnRequest();
+        } else if (message instanceof ChatMessage chat) {
+            handleChatMessage(chat);
         } else {
             send(new ErrorMessage("Unsupported message type: " + message.getType()));
         }
+    }
+
+    private void handleChatMessage(ChatMessage chat) {
+        if (playerId == null) {
+            send(new ErrorMessage("Connect before chatting"));
+            return;
+        }
+        String text = chat.getText() == null ? "" : chat.getText().trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        server.broadcast(new ChatMessage(playerName, text), null);
     }
 
     private void handleEndTurnRequest() {

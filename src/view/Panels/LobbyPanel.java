@@ -2,6 +2,7 @@ package view.Panels;
 
 import network.client.NetworkClient;
 import network.client.NetworkListener;
+import network.protocol.ChatMessage;
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
 import network.protocol.EndTurnRequest;
@@ -46,6 +47,10 @@ public class LobbyPanel extends JPanel {
     private final JLabel turnLabel = styledStatusLabel();
     private final JButton endTurnButton = styledButton("End Turn");
 
+    private final JTextArea chatLog = new JTextArea();
+    private final JTextField chatInput = new JTextField();
+    private final JButton chatSendButton = styledButton("Send");
+
     private NetworkClient client;
     private String myPlayerId;
     private String hostPlayerId;
@@ -68,6 +73,7 @@ public class LobbyPanel extends JPanel {
         innerContainer.add(buildRosterCard(), "ROSTER");
         innerContainer.add(buildStartedCard(), "STARTED");
         add(innerContainer, BorderLayout.CENTER);
+        add(buildChatPanel(), BorderLayout.EAST);
 
         JButton backButton = styledButton("Back to Menu");
         backButton.addActionListener(e -> {
@@ -180,6 +186,58 @@ public class LobbyPanel extends JPanel {
         return panel;
     }
 
+    private JPanel buildChatPanel() {
+        JPanel panel = new JPanel(new BorderLayout(6, 6));
+        panel.setBackground(BACKGROUND);
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 10, 20, 20));
+        panel.setPreferredSize(new Dimension(260, 0));
+
+        JLabel chatTitle = styledLabel("Chat");
+        panel.add(chatTitle, BorderLayout.NORTH);
+
+        chatLog.setEditable(false);
+        chatLog.setLineWrap(true);
+        chatLog.setWrapStyleWord(true);
+        chatLog.setBackground(FIELD_PANEL_BACKGROUND);
+        chatLog.setForeground(Color.WHITE);
+        chatLog.setFont(STATUS_FONT);
+        JScrollPane chatScroll = new JScrollPane(chatLog);
+        panel.add(chatScroll, BorderLayout.CENTER);
+
+        chatInput.setEnabled(false);
+        chatSendButton.setEnabled(false);
+        chatSendButton.setPreferredSize(new Dimension(70, 30));
+        chatInput.addActionListener(e -> sendChat());
+        chatSendButton.addActionListener(e -> sendChat());
+
+        JPanel inputRow = new JPanel(new BorderLayout(6, 0));
+        inputRow.setBackground(BACKGROUND);
+        inputRow.add(chatInput, BorderLayout.CENTER);
+        inputRow.add(chatSendButton, BorderLayout.EAST);
+        panel.add(inputRow, BorderLayout.SOUTH);
+
+        return panel;
+    }
+
+    private void sendChat() {
+        String text = chatInput.getText().trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        sendQuietly(new ChatMessage(null, text));
+        chatInput.setText("");
+    }
+
+    private void appendChatLine(ChatMessage chat) {
+        chatLog.append(chat.getSenderName() + ": " + chat.getText() + "\n");
+        chatLog.setCaretPosition(chatLog.getDocument().getLength());
+    }
+
+    private void setChatEnabled(boolean enabled) {
+        chatInput.setEnabled(enabled);
+        chatSendButton.setEnabled(enabled);
+    }
+
     private static JLabel styledLabel(String text) {
         JLabel label = new JLabel(text);
         label.setFont(LABEL_FONT);
@@ -231,6 +289,7 @@ public class LobbyPanel extends JPanel {
             @Override
             public void onDisconnected(String reason) {
                 connectStatusLabel.setText("Disconnected: " + reason);
+                setChatEnabled(false);
                 innerLayout.show(innerContainer, "CONNECT");
             }
         });
@@ -274,6 +333,8 @@ public class LobbyPanel extends JPanel {
             innerLayout.show(innerContainer, "STARTED");
         } else if (message instanceof TurnChangedMessage turn) {
             handleTurnChanged(turn);
+        } else if (message instanceof ChatMessage chat) {
+            appendChatLine(chat);
         } else if (message instanceof ErrorMessage error) {
             lobbyStatusLabel.setText("Error: " + error.getErrorText());
         }
@@ -289,6 +350,7 @@ public class LobbyPanel extends JPanel {
         myPlayerId = response.getPlayerId();
         ready = false;
         readyButton.setText("Ready Up");
+        setChatEnabled(true);
         innerLayout.show(innerContainer, "ROSTER");
     }
 
@@ -327,6 +389,8 @@ public class LobbyPanel extends JPanel {
         connectStatusLabel.setText(" ");
         turnLabel.setText(" ");
         endTurnButton.setEnabled(false);
+        setChatEnabled(false);
+        chatLog.setText("");
         innerLayout.show(innerContainer, "CONNECT");
     }
 

@@ -44,6 +44,7 @@ public final class MessageCodec {
             case GAME_STARTED -> GameStartedMessage.fromPayload(map, timestamp);
             case END_TURN_REQUEST -> EndTurnRequest.fromPayload(map, timestamp);
             case TURN_CHANGED -> TurnChangedMessage.fromPayload(map, timestamp);
+            case CHAT_MESSAGE -> ChatMessage.fromPayload(map, timestamp);
         };
     }
 }
