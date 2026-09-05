@@ -4,12 +4,14 @@ import network.client.NetworkClient;
 import network.client.NetworkListener;
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
+import network.protocol.EndTurnRequest;
 import network.protocol.ErrorMessage;
 import network.protocol.GameStartedMessage;
 import network.protocol.LobbyStateMessage;
 import network.protocol.Message;
 import network.protocol.SetReadyRequest;
 import network.protocol.StartGameRequest;
+import network.protocol.TurnChangedMessage;
 import view.MainFrame;
 
 import javax.swing.*;
@@ -41,9 +43,13 @@ public class LobbyPanel extends JPanel {
     private final JButton startButton = styledButton("Start Game");
     private final JLabel lobbyStatusLabel = styledStatusLabel();
 
+    private final JLabel turnLabel = styledStatusLabel();
+    private final JButton endTurnButton = styledButton("End Turn");
+
     private NetworkClient client;
     private String myPlayerId;
     private String hostPlayerId;
+    private String currentTurnPlayerId;
     private boolean ready;
 
     public LobbyPanel(MainFrame mainFrame) {
@@ -153,12 +159,24 @@ public class LobbyPanel extends JPanel {
     }
 
     private JPanel buildStartedCard() {
-        JPanel panel = new JPanel(new BorderLayout());
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
         panel.setBackground(BACKGROUND);
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 30, 10, 30));
+
         JLabel startedLabel = new JLabel("Game started! Shared board arrives in a later stage.", SwingConstants.CENTER);
         startedLabel.setFont(LABEL_FONT);
         startedLabel.setForeground(Color.WHITE);
-        panel.add(startedLabel, BorderLayout.CENTER);
+        panel.add(startedLabel, BorderLayout.NORTH);
+
+        panel.add(turnLabel, BorderLayout.CENTER);
+
+        endTurnButton.setEnabled(false);
+        endTurnButton.addActionListener(e -> sendQuietly(new EndTurnRequest()));
+        JPanel controls = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        controls.setBackground(BACKGROUND);
+        controls.add(endTurnButton);
+        panel.add(controls, BorderLayout.SOUTH);
+
         return panel;
     }
 
@@ -254,6 +272,8 @@ public class LobbyPanel extends JPanel {
             handleLobbyState(state);
         } else if (message instanceof GameStartedMessage) {
             innerLayout.show(innerContainer, "STARTED");
+        } else if (message instanceof TurnChangedMessage turn) {
+            handleTurnChanged(turn);
         } else if (message instanceof ErrorMessage error) {
             lobbyStatusLabel.setText("Error: " + error.getErrorText());
         }
@@ -287,6 +307,13 @@ public class LobbyPanel extends JPanel {
         lobbyStatusLabel.setText(isHost ? "You are the host." : "Waiting for host to start.");
     }
 
+    private void handleTurnChanged(TurnChangedMessage turn) {
+        currentTurnPlayerId = turn.getCurrentPlayerId();
+        boolean myTurn = myPlayerId != null && myPlayerId.equals(currentTurnPlayerId);
+        turnLabel.setText(myTurn ? "Your turn!" : "Current turn: " + turn.getCurrentPlayerName());
+        endTurnButton.setEnabled(myTurn);
+    }
+
     private void disconnectQuietly() {
         if (client != null) {
             client.disconnect();
@@ -294,9 +321,12 @@ public class LobbyPanel extends JPanel {
         }
         myPlayerId = null;
         hostPlayerId = null;
+        currentTurnPlayerId = null;
         ready = false;
         rosterModel.clear();
         connectStatusLabel.setText(" ");
+        turnLabel.setText(" ");
+        endTurnButton.setEnabled(false);
         innerLayout.show(innerContainer, "CONNECT");
     }
 

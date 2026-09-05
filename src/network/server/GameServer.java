@@ -5,15 +5,18 @@ import network.protocol.GameStartedMessage;
 import network.protocol.LobbyStateMessage;
 import network.protocol.Message;
 import network.protocol.PlayerLeftMessage;
+import network.protocol.TurnChangedMessage;
 
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class GameServer {
@@ -24,6 +27,9 @@ public class GameServer {
     private Thread acceptThread;
     private volatile boolean running;
     private volatile String hostPlayerId;
+    private final List<String> turnOrder = new CopyOnWriteArrayList<>();
+    private volatile int currentTurnIndex = -1;
+    private volatile boolean gameStarted;
 
     public GameServer(int port) {
         this.port = port;
@@ -91,6 +97,7 @@ public class GameServer {
             hostPlayerId = clientsById.isEmpty() ? null : clientsById.keySet().iterator().next();
         }
         broadcast(new PlayerLeftMessage(playerId, removed.getPlayerName()), playerId);
+        handleDisconnectTurnImpact(playerId);
         broadcastLobbyState();
     }
 
@@ -142,7 +149,76 @@ public class GameServer {
                 return;
             }
         }
+        gameStarted = true;
+        List<String> orderedIds = new ArrayList<>(clientsById.keySet());
+        orderedIds.sort(Comparator.comparingInt(id -> Integer.parseInt(id.substring(1))));
+        turnOrder.clear();
+        turnOrder.addAll(orderedIds);
+        currentTurnIndex = turnOrder.isEmpty() ? -1 : 0;
         broadcast(new GameStartedMessage(), null);
+        broadcastTurnState();
+    }
+
+    void handleEndTurnRequest(String requesterId) {
+        if (!gameStarted) {
+            sendTo(requesterId, new ErrorMessage("Game hasn't started yet"));
+            return;
+        }
+        String currentId = getCurrentTurnPlayerId();
+        if (currentId == null || !currentId.equals(requesterId)) {
+            sendTo(requesterId, new ErrorMessage("It's not your turn"));
+            return;
+        }
+        advanceTurn();
+    }
+
+    private void handleDisconnectTurnImpact(String playerId) {
+        if (!gameStarted) {
+            return;
+        }
+        int index = turnOrder.indexOf(playerId);
+        if (index == -1) {
+            return;
+        }
+        boolean wasCurrentTurn = index == currentTurnIndex;
+        turnOrder.remove(index);
+        if (turnOrder.isEmpty()) {
+            currentTurnIndex = -1;
+            return;
+        }
+        if (index < currentTurnIndex) {
+            currentTurnIndex--;
+        } else if (wasCurrentTurn && currentTurnIndex >= turnOrder.size()) {
+            currentTurnIndex = 0;
+        }
+        if (wasCurrentTurn) {
+            broadcastTurnState();
+        }
+    }
+
+    private void advanceTurn() {
+        if (turnOrder.isEmpty()) {
+            return;
+        }
+        currentTurnIndex = (currentTurnIndex + 1) % turnOrder.size();
+        broadcastTurnState();
+    }
+
+    private String getCurrentTurnPlayerId() {
+        if (turnOrder.isEmpty() || currentTurnIndex < 0 || currentTurnIndex >= turnOrder.size()) {
+            return null;
+        }
+        return turnOrder.get(currentTurnIndex);
+    }
+
+    private void broadcastTurnState() {
+        String currentId = getCurrentTurnPlayerId();
+        if (currentId == null) {
+            return;
+        }
+        ClientHandler handler = clientsById.get(currentId);
+        String currentName = handler != null ? handler.getPlayerName() : "";
+        broadcast(new TurnChangedMessage(currentId, currentName), null);
     }
 
     List<String> getConnectedPlayerNames() {

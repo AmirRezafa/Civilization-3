@@ -9,5 +9,7 @@ public enum MessageType {
     LOBBY_STATE,
     SET_READY_REQUEST,
     START_GAME_REQUEST,
-    GAME_STARTED
+    GAME_STARTED,
+    END_TURN_REQUEST,
+    TURN_CHANGED
 }

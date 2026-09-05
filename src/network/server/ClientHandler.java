@@ -2,6 +2,7 @@ package network.server;
 
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
+import network.protocol.EndTurnRequest;
 import network.protocol.ErrorMessage;
 import network.protocol.Message;
 import network.protocol.MessageCodec;
@@ -67,9 +68,19 @@ class ClientHandler implements Runnable {
             handleSetReadyRequest(request);
         } else if (message instanceof StartGameRequest) {
             handleStartGameRequest();
+        } else if (message instanceof EndTurnRequest) {
+            handleEndTurnRequest();
         } else {
             send(new ErrorMessage("Unsupported message type: " + message.getType()));
         }
+    }
+
+    private void handleEndTurnRequest() {
+        if (playerId == null) {
+            send(new ErrorMessage("Connect before ending a turn"));
+            return;
+        }
+        server.handleEndTurnRequest(playerId);
     }
 
     private void handleSetReadyRequest(SetReadyRequest request) {
