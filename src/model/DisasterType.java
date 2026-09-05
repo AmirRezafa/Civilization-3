@@ -1,0 +1,5 @@
+package model;
+
+public enum DisasterType {
+    TSUNAMI, EARTHQUAKE, FLOOD, VOLCANO, TORNADO, AVALANCHE, SEA_STORM, BEAR_ATTACK
+}
