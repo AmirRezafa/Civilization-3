@@ -8,17 +8,20 @@ import java.util.Map;
 public class LobbyStateMessage extends Message {
     private final List<PlayerEntry> players;
     private final String hostPlayerId;
+    private final String selectedMapName;
 
-    public LobbyStateMessage(List<PlayerEntry> players, String hostPlayerId) {
+    public LobbyStateMessage(List<PlayerEntry> players, String hostPlayerId, String selectedMapName) {
         super(MessageType.LOBBY_STATE);
         this.players = players;
         this.hostPlayerId = hostPlayerId;
+        this.selectedMapName = selectedMapName;
     }
 
-    private LobbyStateMessage(List<PlayerEntry> players, String hostPlayerId, long timestamp) {
+    private LobbyStateMessage(List<PlayerEntry> players, String hostPlayerId, String selectedMapName, long timestamp) {
         super(MessageType.LOBBY_STATE, timestamp);
         this.players = players;
         this.hostPlayerId = hostPlayerId;
+        this.selectedMapName = selectedMapName;
     }
 
     public List<PlayerEntry> getPlayers() {
@@ -27,6 +30,10 @@ public class LobbyStateMessage extends Message {
 
     public String getHostPlayerId() {
         return hostPlayerId;
+    }
+
+    public String getSelectedMapName() {
+        return selectedMapName;
     }
 
     @Override
@@ -42,6 +49,7 @@ public class LobbyStateMessage extends Message {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("players", encodedPlayers);
         payload.put("hostPlayerId", hostPlayerId);
+        payload.put("selectedMapName", selectedMapName);
         return payload;
     }
 
@@ -59,7 +67,8 @@ public class LobbyStateMessage extends Message {
             }
         }
         String hostPlayerId = (String) payload.get("hostPlayerId");
-        return new LobbyStateMessage(players, hostPlayerId, timestamp);
+        String selectedMapName = (String) payload.get("selectedMapName");
+        return new LobbyStateMessage(players, hostPlayerId, selectedMapName, timestamp);
     }
 
     public record PlayerEntry(String playerId, String playerName, boolean ready) {

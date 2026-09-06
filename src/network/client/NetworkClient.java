@@ -9,16 +9,25 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 public class NetworkClient {
+    private static final long HEARTBEAT_INTERVAL_MS = 5000;
+
     private final NetworkListener listener;
     private final Object writeLock = new Object();
     private Socket socket;
     private BufferedReader in;
     private BufferedWriter out;
     private Thread listenerThread;
+    private Thread heartbeatThread;
+    private DatagramSocket heartbeatSocket;
+    private String host;
+    private int port;
     private volatile boolean connected;
 
     public NetworkClient(NetworkListener listener) {
@@ -26,6 +35,8 @@ public class NetworkClient {
     }
 
     public void connect(String host, int port) throws IOException {
+        this.host = host;
+        this.port = port;
         socket = new Socket(host, port);
         in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
         out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
@@ -33,6 +44,37 @@ public class NetworkClient {
         listenerThread = new Thread(this::listenLoop, "network-listener");
         listenerThread.setDaemon(true);
         listenerThread.start();
+    }
+
+    public void startHeartbeat(String playerId) {
+        try {
+            heartbeatSocket = new DatagramSocket();
+        } catch (IOException e) {
+            return;
+        }
+        InetAddress address;
+        try {
+            address = InetAddress.getByName(host);
+        } catch (IOException e) {
+            heartbeatSocket.close();
+            return;
+        }
+        byte[] payload = playerId.getBytes(StandardCharsets.UTF_8);
+        heartbeatThread = new Thread(() -> heartbeatLoop(address, payload), "udp-heartbeat");
+        heartbeatThread.setDaemon(true);
+        heartbeatThread.start();
+    }
+
+    private void heartbeatLoop(InetAddress address, byte[] payload) {
+        while (connected) {
+            try {
+                DatagramPacket packet = new DatagramPacket(payload, payload.length, address, port);
+                heartbeatSocket.send(packet);
+                Thread.sleep(HEARTBEAT_INTERVAL_MS);
+            } catch (IOException | InterruptedException e) {
+                break;
+            }
+        }
     }
 
     private void listenLoop() {
@@ -77,6 +119,9 @@ public class NetworkClient {
                 socket.close();
             }
         } catch (IOException ignored) {
+        }
+        if (heartbeatSocket != null) {
+            heartbeatSocket.close();
         }
     }
 

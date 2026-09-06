@@ -5,19 +5,26 @@ import network.client.NetworkListener;
 import network.protocol.ChatMessage;
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
+import network.protocol.DeclareWarRequest;
+import network.protocol.DiplomacyChangedMessage;
 import network.protocol.EndTurnRequest;
 import network.protocol.ErrorMessage;
 import network.protocol.GameStartedMessage;
+import network.protocol.GameStateSnapshotMessage;
 import network.protocol.LobbyStateMessage;
 import network.protocol.Message;
+import network.protocol.SelectMapRequest;
 import network.protocol.SetReadyRequest;
 import network.protocol.StartGameRequest;
 import network.protocol.TurnChangedMessage;
+import network.protocol.UnitMovedMessage;
 import view.MainFrame;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
 
 public class LobbyPanel extends JPanel {
     private static final Color BACKGROUND = new Color(25, 25, 25);
@@ -42,10 +49,18 @@ public class LobbyPanel extends JPanel {
     private final JList<LobbyStateMessage.PlayerEntry> rosterList = new JList<>(rosterModel);
     private final JButton readyButton = styledButton("Ready Up");
     private final JButton startButton = styledButton("Start Game");
+    private final JButton declareWarButton = styledButton("Declare War");
     private final JLabel lobbyStatusLabel = styledStatusLabel();
+    private final Set<String> myEnemyIds = new HashSet<>();
+
+    private final JComboBox<String> mapComboBox = new JComboBox<>(new String[]{"Grasslands Valley", "Highland Frontier", "Coastal Reach"});
+    private boolean applyingRemoteMapState;
 
     private final JLabel turnLabel = styledStatusLabel();
     private final JButton endTurnButton = styledButton("End Turn");
+    private final JLabel startedLabel = new JLabel("", SwingConstants.CENTER);
+    private final NetworkBoardPanel boardPanel = new NetworkBoardPanel();
+    private String currentMapName;
 
     private final JTextArea chatLog = new JTextArea();
     private final JTextField chatInput = new JTextField();
@@ -146,14 +161,34 @@ public class LobbyPanel extends JPanel {
         scrollPane.getViewport().setBackground(FIELD_PANEL_BACKGROUND);
         panel.add(scrollPane, BorderLayout.CENTER);
 
+        JPanel mapRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 4));
+        mapRow.setBackground(BACKGROUND);
+        mapRow.add(styledLabel("Map:"));
+        mapComboBox.addActionListener(e -> {
+            if (applyingRemoteMapState) {
+                return;
+            }
+            String selected = (String) mapComboBox.getSelectedItem();
+            if (selected != null) {
+                sendQuietly(new SelectMapRequest(selected));
+            }
+        });
+        mapRow.add(mapComboBox);
+        panel.add(mapRow, BorderLayout.NORTH);
+
         readyButton.addActionListener(e -> toggleReady());
         startButton.addActionListener(e -> requestStart());
         startButton.setEnabled(false);
+
+        declareWarButton.setEnabled(false);
+        declareWarButton.addActionListener(e -> declareWarOnSelected());
+        rosterList.addListSelectionListener(e -> updateDeclareWarButtonState());
 
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.CENTER, 16, 8));
         controls.setBackground(BACKGROUND);
         controls.add(readyButton);
         controls.add(startButton);
+        controls.add(declareWarButton);
 
         JPanel south = new JPanel(new BorderLayout());
         south.setBackground(BACKGROUND);
@@ -169,17 +204,20 @@ public class LobbyPanel extends JPanel {
         panel.setBackground(BACKGROUND);
         panel.setBorder(BorderFactory.createEmptyBorder(10, 30, 10, 30));
 
-        JLabel startedLabel = new JLabel("Game started! Shared board arrives in a later stage.", SwingConstants.CENTER);
         startedLabel.setFont(LABEL_FONT);
         startedLabel.setForeground(Color.WHITE);
         panel.add(startedLabel, BorderLayout.NORTH);
 
-        panel.add(turnLabel, BorderLayout.CENTER);
+        boardPanel.setBackground(FIELD_PANEL_BACKGROUND);
+        JScrollPane boardScroll = new JScrollPane(boardPanel);
+        boardScroll.getViewport().setBackground(FIELD_PANEL_BACKGROUND);
+        panel.add(boardScroll, BorderLayout.CENTER);
 
         endTurnButton.setEnabled(false);
         endTurnButton.addActionListener(e -> sendQuietly(new EndTurnRequest()));
-        JPanel controls = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        JPanel controls = new JPanel(new FlowLayout(FlowLayout.CENTER, 16, 8));
         controls.setBackground(BACKGROUND);
+        controls.add(turnLabel);
         controls.add(endTurnButton);
         panel.add(controls, BorderLayout.SOUTH);
 
@@ -330,11 +368,19 @@ public class LobbyPanel extends JPanel {
         } else if (message instanceof LobbyStateMessage state) {
             handleLobbyState(state);
         } else if (message instanceof GameStartedMessage) {
+            startedLabel.setText("Game started on \"" + currentMapName + "\"! Shared board arrives in a later stage.");
             innerLayout.show(innerContainer, "STARTED");
         } else if (message instanceof TurnChangedMessage turn) {
             handleTurnChanged(turn);
         } else if (message instanceof ChatMessage chat) {
             appendChatLine(chat);
+        } else if (message instanceof DiplomacyChangedMessage diplomacy) {
+            handleDiplomacyChanged(diplomacy);
+        } else if (message instanceof GameStateSnapshotMessage snapshot) {
+            boardPanel.setClient(client);
+            boardPanel.loadSnapshot(snapshot, myPlayerId);
+        } else if (message instanceof UnitMovedMessage moved) {
+            boardPanel.applyUnitMoved(moved);
         } else if (message instanceof ErrorMessage error) {
             lobbyStatusLabel.setText("Error: " + error.getErrorText());
         }
@@ -351,6 +397,7 @@ public class LobbyPanel extends JPanel {
         ready = false;
         readyButton.setText("Ready Up");
         setChatEnabled(true);
+        client.startHeartbeat(myPlayerId);
         innerLayout.show(innerContainer, "ROSTER");
     }
 
@@ -367,6 +414,41 @@ public class LobbyPanel extends JPanel {
         boolean isHost = myPlayerId != null && myPlayerId.equals(hostPlayerId);
         startButton.setEnabled(isHost && allReady);
         lobbyStatusLabel.setText(isHost ? "You are the host." : "Waiting for host to start.");
+        updateDeclareWarButtonState();
+
+        currentMapName = state.getSelectedMapName();
+        applyingRemoteMapState = true;
+        mapComboBox.setSelectedItem(currentMapName);
+        applyingRemoteMapState = false;
+        mapComboBox.setEnabled(isHost);
+    }
+
+    private void declareWarOnSelected() {
+        LobbyStateMessage.PlayerEntry selected = rosterList.getSelectedValue();
+        if (selected != null) {
+            sendQuietly(new DeclareWarRequest(selected.playerId()));
+        }
+    }
+
+    private void updateDeclareWarButtonState() {
+        LobbyStateMessage.PlayerEntry selected = rosterList.getSelectedValue();
+        boolean canDeclare = selected != null && myPlayerId != null
+                && !selected.playerId().equals(myPlayerId)
+                && !myEnemyIds.contains(selected.playerId());
+        declareWarButton.setEnabled(canDeclare);
+    }
+
+    private void handleDiplomacyChanged(DiplomacyChangedMessage diplomacy) {
+        if (myPlayerId != null) {
+            if (myPlayerId.equals(diplomacy.getPlayerAId())) {
+                myEnemyIds.add(diplomacy.getPlayerBId());
+            } else if (myPlayerId.equals(diplomacy.getPlayerBId())) {
+                myEnemyIds.add(diplomacy.getPlayerAId());
+            }
+        }
+        lobbyStatusLabel.setText(diplomacy.getPlayerAName() + " declared war on " + diplomacy.getPlayerBName() + "!");
+        rosterList.repaint();
+        updateDeclareWarButtonState();
     }
 
     private void handleTurnChanged(TurnChangedMessage turn) {
@@ -374,6 +456,7 @@ public class LobbyPanel extends JPanel {
         boolean myTurn = myPlayerId != null && myPlayerId.equals(currentTurnPlayerId);
         turnLabel.setText(myTurn ? "Your turn!" : "Current turn: " + turn.getCurrentPlayerName());
         endTurnButton.setEnabled(myTurn);
+        boardPanel.setCurrentTurnPlayerId(currentTurnPlayerId);
     }
 
     private void disconnectQuietly() {
@@ -386,11 +469,17 @@ public class LobbyPanel extends JPanel {
         currentTurnPlayerId = null;
         ready = false;
         rosterModel.clear();
+        myEnemyIds.clear();
+        declareWarButton.setEnabled(false);
+        mapComboBox.setEnabled(false);
+        currentMapName = null;
+        startedLabel.setText("");
         connectStatusLabel.setText(" ");
         turnLabel.setText(" ");
         endTurnButton.setEnabled(false);
         setChatEnabled(false);
         chatLog.setText("");
+        boardPanel.reset();
         innerLayout.show(innerContainer, "CONNECT");
     }
 
@@ -402,9 +491,10 @@ public class LobbyPanel extends JPanel {
             if (value instanceof LobbyStateMessage.PlayerEntry entry) {
                 boolean isHost = entry.playerId().equals(hostPlayerId);
                 String hostTag = isHost ? " <font color='#F1C40F'>&#9733; HOST</font>" : "";
+                String enemyTag = myEnemyIds.contains(entry.playerId()) ? " <font color='#E74C3C'>(ENEMY)</font>" : "";
                 String readyColor = entry.ready() ? "#2ECC71" : "#95A5A6";
                 String readyText = entry.ready() ? "Ready" : "Not Ready";
-                label.setText("<html><b>" + entry.playerName() + "</b>" + hostTag
+                label.setText("<html><b>" + entry.playerName() + "</b>" + hostTag + enemyTag
                         + " &mdash; <font color='" + readyColor + "'>" + readyText + "</font></html>");
             }
             label.setOpaque(true);

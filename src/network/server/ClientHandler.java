@@ -3,11 +3,14 @@ package network.server;
 import network.protocol.ChatMessage;
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
+import network.protocol.DeclareWarRequest;
 import network.protocol.EndTurnRequest;
 import network.protocol.ErrorMessage;
 import network.protocol.Message;
 import network.protocol.MessageCodec;
+import network.protocol.MoveUnitRequest;
 import network.protocol.PlayerJoinedMessage;
+import network.protocol.SelectMapRequest;
 import network.protocol.SetReadyRequest;
 import network.protocol.StartGameRequest;
 
@@ -73,9 +76,39 @@ class ClientHandler implements Runnable {
             handleEndTurnRequest();
         } else if (message instanceof ChatMessage chat) {
             handleChatMessage(chat);
+        } else if (message instanceof DeclareWarRequest request) {
+            handleDeclareWarRequest(request);
+        } else if (message instanceof SelectMapRequest request) {
+            handleSelectMapRequest(request);
+        } else if (message instanceof MoveUnitRequest request) {
+            handleMoveUnitRequest(request);
         } else {
             send(new ErrorMessage("Unsupported message type: " + message.getType()));
         }
+    }
+
+    private void handleMoveUnitRequest(MoveUnitRequest request) {
+        if (playerId == null) {
+            send(new ErrorMessage("Connect before moving a unit"));
+            return;
+        }
+        server.handleMoveUnitRequest(playerId, request.getUnitId(), request.getTargetCol(), request.getTargetRow());
+    }
+
+    private void handleSelectMapRequest(SelectMapRequest request) {
+        if (playerId == null) {
+            send(new ErrorMessage("Connect before selecting a map"));
+            return;
+        }
+        server.handleSelectMapRequest(playerId, request.getMapName());
+    }
+
+    private void handleDeclareWarRequest(DeclareWarRequest request) {
+        if (playerId == null) {
+            send(new ErrorMessage("Connect before declaring war"));
+            return;
+        }
+        server.handleDeclareWarRequest(playerId, request.getTargetPlayerId());
     }
 
     private void handleChatMessage(ChatMessage chat) {

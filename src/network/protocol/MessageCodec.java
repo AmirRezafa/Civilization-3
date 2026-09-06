@@ -45,6 +45,12 @@ public final class MessageCodec {
             case END_TURN_REQUEST -> EndTurnRequest.fromPayload(map, timestamp);
             case TURN_CHANGED -> TurnChangedMessage.fromPayload(map, timestamp);
             case CHAT_MESSAGE -> ChatMessage.fromPayload(map, timestamp);
+            case DECLARE_WAR_REQUEST -> DeclareWarRequest.fromPayload(map, timestamp);
+            case DIPLOMACY_CHANGED -> DiplomacyChangedMessage.fromPayload(map, timestamp);
+            case SELECT_MAP_REQUEST -> SelectMapRequest.fromPayload(map, timestamp);
+            case GAME_STATE_SNAPSHOT -> GameStateSnapshotMessage.fromPayload(map, timestamp);
+            case MOVE_UNIT_REQUEST -> MoveUnitRequest.fromPayload(map, timestamp);
+            case UNIT_MOVED -> UnitMovedMessage.fromPayload(map, timestamp);
         };
     }
 }
