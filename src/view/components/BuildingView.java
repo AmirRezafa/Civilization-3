@@ -69,6 +69,10 @@ public class BuildingView {
                 bgColor = new Color(155, 89, 182);
                 label = "MN";
                 break;
+            case APOTHECARY:
+                bgColor = new Color(46, 134, 130);
+                label = "AP";
+                break;
             default:
                 bgColor = Color.WHITE;
                 label = "?";

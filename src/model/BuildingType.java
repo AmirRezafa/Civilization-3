@@ -116,7 +116,9 @@ public enum BuildingType {
     OUTPOST("Outpost", null, ResourceType.NONE,
             0, 0, 0, 0, 0, 2, false, 1),
     MONUMENT("Monument", TerrainType.PLAIN, ResourceType.NONE,
-            30, 30, 0, 0, 2, 0, true, 1);
+            30, 30, 0, 0, 2, 0, true, 1),
+    APOTHECARY("Apothecary", TerrainType.PLAIN, ResourceType.NONE,
+            25, 15, 0, 0, 2, 0, true, 2);
 
     private final String displayName;
     private final TerrainType requiredTerrain;
