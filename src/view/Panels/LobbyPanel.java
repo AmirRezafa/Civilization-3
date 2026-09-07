@@ -1,29 +1,52 @@
 package view.Panels;
 
+import model.ResourceType;
 import network.client.NetworkClient;
 import network.client.NetworkListener;
+import network.protocol.BuildingConstructedMessage;
+import network.protocol.CheatAppliedMessage;
 import network.protocol.ChatMessage;
+import network.protocol.CombatResultMessage;
 import network.protocol.ConnectRequest;
 import network.protocol.ConnectResponse;
 import network.protocol.DeclareWarRequest;
 import network.protocol.DiplomacyChangedMessage;
+import network.protocol.DisasterOccurredMessage;
 import network.protocol.EndTurnRequest;
 import network.protocol.ErrorMessage;
+import network.protocol.GameOverMessage;
+import network.protocol.GameSavedMessage;
 import network.protocol.GameStartedMessage;
 import network.protocol.GameStateSnapshotMessage;
+import network.protocol.ItemUsedMessage;
+import network.protocol.LoadGameRequest;
 import network.protocol.LobbyStateMessage;
 import network.protocol.Message;
+import network.protocol.PlayerEconomyMessage;
+import network.protocol.PlayerEliminatedMessage;
+import network.protocol.ProductionCompletedMessage;
+import network.protocol.ProductionStartedMessage;
+import network.protocol.SaveGameRequest;
 import network.protocol.SelectMapRequest;
 import network.protocol.SetReadyRequest;
 import network.protocol.StartGameRequest;
+import network.protocol.TradeOfferReceivedMessage;
+import network.protocol.TradeOfferRequest;
+import network.protocol.TradeOfferResolvedMessage;
+import network.protocol.TradeRespondRequest;
 import network.protocol.TurnChangedMessage;
 import network.protocol.UnitMovedMessage;
+import network.protocol.UnitRemovedMessage;
 import view.MainFrame;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class LobbyPanel extends JPanel {
@@ -49,6 +72,7 @@ public class LobbyPanel extends JPanel {
     private final JList<LobbyStateMessage.PlayerEntry> rosterList = new JList<>(rosterModel);
     private final JButton readyButton = styledButton("Ready Up");
     private final JButton startButton = styledButton("Start Game");
+    private final JButton loadButton = styledButton("Load Saved Game");
     private final JButton declareWarButton = styledButton("Declare War");
     private final JLabel lobbyStatusLabel = styledStatusLabel();
     private final Set<String> myEnemyIds = new HashSet<>();
@@ -58,9 +82,18 @@ public class LobbyPanel extends JPanel {
 
     private final JLabel turnLabel = styledStatusLabel();
     private final JButton endTurnButton = styledButton("End Turn");
+    private final JButton saveButton = styledButton("Save Game");
+    private final JButton tradeButton = styledButton("Propose Trade");
     private final JLabel startedLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel resourcesLabel = styledStatusLabel();
+    private final JLabel combatLogLabel = styledStatusLabel();
     private final NetworkBoardPanel boardPanel = new NetworkBoardPanel();
+    private final ActionsPanel actionsPanel = new ActionsPanel(boardPanel);
     private String currentMapName;
+    private static final ResourceType[] TRADABLE_RESOURCES = {
+            ResourceType.WOOD, ResourceType.STONE, ResourceType.IRON,
+            ResourceType.WHEAT, ResourceType.CATTLE, ResourceType.FISH
+    };
 
     private final JTextArea chatLog = new JTextArea();
     private final JTextField chatInput = new JTextField();
@@ -179,6 +212,8 @@ public class LobbyPanel extends JPanel {
         readyButton.addActionListener(e -> toggleReady());
         startButton.addActionListener(e -> requestStart());
         startButton.setEnabled(false);
+        loadButton.addActionListener(e -> sendQuietly(new LoadGameRequest()));
+        loadButton.setEnabled(false);
 
         declareWarButton.setEnabled(false);
         declareWarButton.addActionListener(e -> declareWarOnSelected());
@@ -188,6 +223,7 @@ public class LobbyPanel extends JPanel {
         controls.setBackground(BACKGROUND);
         controls.add(readyButton);
         controls.add(startButton);
+        controls.add(loadButton);
         controls.add(declareWarButton);
 
         JPanel south = new JPanel(new BorderLayout());
@@ -204,22 +240,42 @@ public class LobbyPanel extends JPanel {
         panel.setBackground(BACKGROUND);
         panel.setBorder(BorderFactory.createEmptyBorder(10, 30, 10, 30));
 
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setBackground(BACKGROUND);
         startedLabel.setFont(LABEL_FONT);
         startedLabel.setForeground(Color.WHITE);
-        panel.add(startedLabel, BorderLayout.NORTH);
+        topPanel.add(startedLabel, BorderLayout.NORTH);
+        topPanel.add(resourcesLabel, BorderLayout.SOUTH);
+        panel.add(topPanel, BorderLayout.NORTH);
 
         boardPanel.setBackground(FIELD_PANEL_BACKGROUND);
         JScrollPane boardScroll = new JScrollPane(boardPanel);
         boardScroll.getViewport().setBackground(FIELD_PANEL_BACKGROUND);
         panel.add(boardScroll, BorderLayout.CENTER);
 
+        actionsPanel.setPreferredSize(new Dimension(300, 0));
+        panel.add(actionsPanel, BorderLayout.EAST);
+
         endTurnButton.setEnabled(false);
         endTurnButton.addActionListener(e -> sendQuietly(new EndTurnRequest()));
+        boardPanel.setCombatLogListener(combatLogLabel::setText);
+
+        saveButton.setEnabled(false);
+        saveButton.addActionListener(e -> sendQuietly(new SaveGameRequest()));
+        tradeButton.addActionListener(e -> openTradeDialog());
+
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.CENTER, 16, 8));
         controls.setBackground(BACKGROUND);
         controls.add(turnLabel);
         controls.add(endTurnButton);
-        panel.add(controls, BorderLayout.SOUTH);
+        controls.add(tradeButton);
+        controls.add(saveButton);
+
+        JPanel south = new JPanel(new BorderLayout());
+        south.setBackground(BACKGROUND);
+        south.add(controls, BorderLayout.CENTER);
+        south.add(combatLogLabel, BorderLayout.SOUTH);
+        panel.add(south, BorderLayout.SOUTH);
 
         return panel;
     }
@@ -368,7 +424,8 @@ public class LobbyPanel extends JPanel {
         } else if (message instanceof LobbyStateMessage state) {
             handleLobbyState(state);
         } else if (message instanceof GameStartedMessage) {
-            startedLabel.setText("Game started on \"" + currentMapName + "\"! Shared board arrives in a later stage.");
+            startedLabel.setText("Game started on \"" + currentMapName + "\"!");
+            saveButton.setEnabled(myPlayerId != null && myPlayerId.equals(hostPlayerId));
             innerLayout.show(innerContainer, "STARTED");
         } else if (message instanceof TurnChangedMessage turn) {
             handleTurnChanged(turn);
@@ -379,11 +436,147 @@ public class LobbyPanel extends JPanel {
         } else if (message instanceof GameStateSnapshotMessage snapshot) {
             boardPanel.setClient(client);
             boardPanel.loadSnapshot(snapshot, myPlayerId);
+            applyEconomy(snapshot.getYourResources(), snapshot.getYourTechs(), snapshot.getYourItems());
         } else if (message instanceof UnitMovedMessage moved) {
             boardPanel.applyUnitMoved(moved);
+        } else if (message instanceof CombatResultMessage combatResult) {
+            boardPanel.applyCombatResult(combatResult);
+        } else if (message instanceof ProductionStartedMessage production) {
+            boardPanel.applyProductionStarted(production);
+        } else if (message instanceof ProductionCompletedMessage production) {
+            boardPanel.applyProductionCompleted(production);
+        } else if (message instanceof BuildingConstructedMessage constructed) {
+            boardPanel.applyBuildingConstructed(constructed);
+        } else if (message instanceof UnitRemovedMessage removed) {
+            boardPanel.applyUnitRemoved(removed);
+        } else if (message instanceof DisasterOccurredMessage disaster) {
+            boardPanel.applyDisaster(disaster);
+        } else if (message instanceof PlayerEconomyMessage economy) {
+            applyEconomy(economy.getResources(), economy.getTechs(), economy.getItems());
+        } else if (message instanceof PlayerEliminatedMessage eliminated) {
+            combatLogLabel.setText("Player " + eliminated.getPlayerId() + " has been eliminated.");
+        } else if (message instanceof GameOverMessage gameOver) {
+            endTurnButton.setEnabled(false);
+            JOptionPane.showMessageDialog(this, gameOver.getWinnerName() + " has won the game!",
+                    "Game Over", JOptionPane.INFORMATION_MESSAGE);
+        } else if (message instanceof CheatAppliedMessage cheat) {
+            combatLogLabel.setText(cheat.getCommand() + ": " + cheat.getDetail());
+        } else if (message instanceof ItemUsedMessage itemUsed) {
+            combatLogLabel.setText("Item used (" + itemUsed.getItemType() + "): " + itemUsed.getDetail());
+        } else if (message instanceof TradeOfferReceivedMessage tradeOffer) {
+            handleIncomingTradeOffer(tradeOffer);
+        } else if (message instanceof TradeOfferResolvedMessage tradeResolved) {
+            lobbyStatusLabel.setText("Trade offer " + (tradeResolved.isAccepted() ? "accepted." : "rejected."));
+        } else if (message instanceof GameSavedMessage saved) {
+            lobbyStatusLabel.setText(saved.getDetail());
         } else if (message instanceof ErrorMessage error) {
             lobbyStatusLabel.setText("Error: " + error.getErrorText());
         }
+    }
+
+    private void applyEconomy(Map<String, Integer> resources, List<String> techs, Map<String, Integer> items) {
+        actionsPanel.setEconomy(resources, techs, items);
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : resources.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append("  ");
+            }
+            sb.append(entry.getKey()).append(": ").append(entry.getValue());
+        }
+        resourcesLabel.setText(sb.toString());
+    }
+
+    private void openTradeDialog() {
+        List<LobbyStateMessage.PlayerEntry> candidates = new ArrayList<>();
+        for (int i = 0; i < rosterModel.size(); i++) {
+            LobbyStateMessage.PlayerEntry entry = rosterModel.get(i);
+            if (!entry.playerId().equals(myPlayerId)) {
+                candidates.add(entry);
+            }
+        }
+        if (candidates.isEmpty()) {
+            lobbyStatusLabel.setText("No other players to trade with.");
+            return;
+        }
+
+        JComboBox<LobbyStateMessage.PlayerEntry> targetCombo = new JComboBox<>(candidates.toArray(new LobbyStateMessage.PlayerEntry[0]));
+        targetCombo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                            boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof LobbyStateMessage.PlayerEntry entry) {
+                    label.setText(entry.playerName());
+                }
+                return label;
+            }
+        });
+
+        JComboBox<ResourceType> offerResourceCombo = new JComboBox<>(TRADABLE_RESOURCES);
+        JTextField offerAmountField = new JTextField("50", 5);
+        JComboBox<ResourceType> requestResourceCombo = new JComboBox<>(TRADABLE_RESOURCES);
+        requestResourceCombo.setSelectedIndex(1);
+        JTextField requestAmountField = new JTextField("50", 5);
+
+        JPanel form = new JPanel(new GridLayout(0, 2, 6, 6));
+        form.add(new JLabel("Trade with:"));
+        form.add(targetCombo);
+        form.add(new JLabel("You give:"));
+        form.add(offerResourceCombo);
+        form.add(new JLabel("Amount:"));
+        form.add(offerAmountField);
+        form.add(new JLabel("You get:"));
+        form.add(requestResourceCombo);
+        form.add(new JLabel("Amount:"));
+        form.add(requestAmountField);
+
+        int result = JOptionPane.showConfirmDialog(this, form, "Propose Trade", JOptionPane.OK_CANCEL_OPTION);
+        if (result != JOptionPane.OK_OPTION) {
+            return;
+        }
+
+        LobbyStateMessage.PlayerEntry target = (LobbyStateMessage.PlayerEntry) targetCombo.getSelectedItem();
+        ResourceType offerResource = (ResourceType) offerResourceCombo.getSelectedItem();
+        ResourceType requestResource = (ResourceType) requestResourceCombo.getSelectedItem();
+        int offerAmount;
+        int requestAmount;
+        try {
+            offerAmount = Integer.parseInt(offerAmountField.getText().trim());
+            requestAmount = Integer.parseInt(requestAmountField.getText().trim());
+        } catch (NumberFormatException e) {
+            lobbyStatusLabel.setText("Amounts must be numbers.");
+            return;
+        }
+        if (target == null || offerResource == null || requestResource == null || offerAmount <= 0 || requestAmount <= 0) {
+            return;
+        }
+
+        Map<String, Integer> offering = new HashMap<>();
+        offering.put(offerResource.name(), offerAmount);
+        Map<String, Integer> requesting = new HashMap<>();
+        requesting.put(requestResource.name(), requestAmount);
+        sendQuietly(new TradeOfferRequest(target.playerId(), offering, requesting));
+    }
+
+    private void handleIncomingTradeOffer(TradeOfferReceivedMessage offer) {
+        String text = offer.getFromPlayerName() + " offers you " + describeResourceMap(offer.getOffering())
+                + " for " + describeResourceMap(offer.getRequesting()) + ". Accept?";
+        int result = JOptionPane.showConfirmDialog(this, text, "Trade Offer", JOptionPane.YES_NO_OPTION);
+        sendQuietly(new TradeRespondRequest(offer.getOfferId(), result == JOptionPane.YES_OPTION));
+    }
+
+    private String describeResourceMap(Map<String, Integer> resources) {
+        if (resources.isEmpty()) {
+            return "nothing";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : resources.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(entry.getValue()).append(" ").append(entry.getKey());
+        }
+        return sb.toString();
     }
 
     private void handleConnectResponse(ConnectResponse response) {
@@ -413,6 +606,7 @@ public class LobbyPanel extends JPanel {
         }
         boolean isHost = myPlayerId != null && myPlayerId.equals(hostPlayerId);
         startButton.setEnabled(isHost && allReady);
+        loadButton.setEnabled(isHost);
         lobbyStatusLabel.setText(isHost ? "You are the host." : "Waiting for host to start.");
         updateDeclareWarButtonState();
 
@@ -472,14 +666,19 @@ public class LobbyPanel extends JPanel {
         myEnemyIds.clear();
         declareWarButton.setEnabled(false);
         mapComboBox.setEnabled(false);
+        loadButton.setEnabled(false);
+        saveButton.setEnabled(false);
         currentMapName = null;
         startedLabel.setText("");
+        resourcesLabel.setText(" ");
         connectStatusLabel.setText(" ");
         turnLabel.setText(" ");
+        combatLogLabel.setText(" ");
         endTurnButton.setEnabled(false);
         setChatEnabled(false);
         chatLog.setText("");
         boardPanel.reset();
+        actionsPanel.setEconomy(new HashMap<>(), List.of(), new HashMap<>());
         innerLayout.show(innerContainer, "CONNECT");
     }
 

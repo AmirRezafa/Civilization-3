@@ -40,6 +40,7 @@ bin/
 
 ### Save games ###
 saves/
+network_saves/
 
 ### Gradle ###
 .gradle/

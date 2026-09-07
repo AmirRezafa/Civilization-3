@@ -11,23 +11,36 @@ public class GameStateSnapshotMessage extends Message {
     private final List<TileEntry> tiles;
     private final List<UnitEntry> units;
     private final List<BuildingEntry> buildings;
+    private final Map<String, Integer> yourResources;
+    private final List<String> yourTechs;
+    private final Map<String, Integer> yourItems;
 
-    public GameStateSnapshotMessage(int rows, int cols, List<TileEntry> tiles, List<UnitEntry> units, List<BuildingEntry> buildings) {
+    public GameStateSnapshotMessage(int rows, int cols, List<TileEntry> tiles, List<UnitEntry> units,
+                                     List<BuildingEntry> buildings, Map<String, Integer> yourResources,
+                                     List<String> yourTechs, Map<String, Integer> yourItems) {
         super(MessageType.GAME_STATE_SNAPSHOT);
         this.rows = rows;
         this.cols = cols;
         this.tiles = tiles;
         this.units = units;
         this.buildings = buildings;
+        this.yourResources = yourResources;
+        this.yourTechs = yourTechs;
+        this.yourItems = yourItems;
     }
 
-    private GameStateSnapshotMessage(int rows, int cols, List<TileEntry> tiles, List<UnitEntry> units, List<BuildingEntry> buildings, long timestamp) {
+    private GameStateSnapshotMessage(int rows, int cols, List<TileEntry> tiles, List<UnitEntry> units,
+                                      List<BuildingEntry> buildings, Map<String, Integer> yourResources,
+                                      List<String> yourTechs, Map<String, Integer> yourItems, long timestamp) {
         super(MessageType.GAME_STATE_SNAPSHOT, timestamp);
         this.rows = rows;
         this.cols = cols;
         this.tiles = tiles;
         this.units = units;
         this.buildings = buildings;
+        this.yourResources = yourResources;
+        this.yourTechs = yourTechs;
+        this.yourItems = yourItems;
     }
 
     public int getRows() {
@@ -50,6 +63,18 @@ public class GameStateSnapshotMessage extends Message {
         return buildings;
     }
 
+    public Map<String, Integer> getYourResources() {
+        return yourResources;
+    }
+
+    public List<String> getYourTechs() {
+        return yourTechs;
+    }
+
+    public Map<String, Integer> getYourItems() {
+        return yourItems;
+    }
+
     @Override
     public Map<String, Object> toPayload() {
         List<Object> encodedTiles = new ArrayList<>();
@@ -63,6 +88,7 @@ public class GameStateSnapshotMessage extends Message {
                 resourceMap.put(entry.getKey(), entry.getValue());
             }
             tileMap.put("resources", resourceMap);
+            tileMap.put("visible", tile.visible());
             encodedTiles.add(tileMap);
         }
 
@@ -75,6 +101,7 @@ public class GameStateSnapshotMessage extends Message {
             unitMap.put("col", unit.col());
             unitMap.put("row", unit.row());
             unitMap.put("currentAP", unit.currentAP());
+            unitMap.put("hp", unit.hp());
             encodedUnits.add(unitMap);
         }
 
@@ -86,6 +113,12 @@ public class GameStateSnapshotMessage extends Message {
             buildingMap.put("buildingType", building.buildingType());
             buildingMap.put("col", building.col());
             buildingMap.put("row", building.row());
+            buildingMap.put("hp", building.hp());
+            buildingMap.put("maxHp", building.maxHp());
+            buildingMap.put("townHallLevel", building.townHallLevel());
+            buildingMap.put("producingKind", building.producingKind());
+            buildingMap.put("producingTarget", building.producingTarget());
+            buildingMap.put("turnsRemaining", building.turnsRemaining());
             encodedBuildings.add(buildingMap);
         }
 
@@ -95,6 +128,9 @@ public class GameStateSnapshotMessage extends Message {
         payload.put("tiles", encodedTiles);
         payload.put("units", encodedUnits);
         payload.put("buildings", encodedBuildings);
+        payload.put("yourResources", yourResources);
+        payload.put("yourTechs", yourTechs);
+        payload.put("yourItems", yourItems);
         return payload;
     }
 
@@ -118,7 +154,8 @@ public class GameStateSnapshotMessage extends Message {
                             resources.put((String) entry.getKey(), ((Number) entry.getValue()).intValue());
                         }
                     }
-                    tiles.add(new TileEntry(col, row, terrain, resources));
+                    boolean visible = !(map.get("visible") instanceof Boolean b) || b;
+                    tiles.add(new TileEntry(col, row, terrain, resources, visible));
                 }
             }
         }
@@ -134,7 +171,8 @@ public class GameStateSnapshotMessage extends Message {
                     int col = ((Number) map.get("col")).intValue();
                     int row = ((Number) map.get("row")).intValue();
                     int currentAP = ((Number) map.get("currentAP")).intValue();
-                    units.add(new UnitEntry(id, ownerId, unitType, col, row, currentAP));
+                    int hp = map.get("hp") instanceof Number number ? number.intValue() : 0;
+                    units.add(new UnitEntry(id, ownerId, unitType, col, row, currentAP, hp));
                 }
             }
         }
@@ -149,20 +187,55 @@ public class GameStateSnapshotMessage extends Message {
                     String buildingType = (String) map.get("buildingType");
                     int col = ((Number) map.get("col")).intValue();
                     int row = ((Number) map.get("row")).intValue();
-                    buildings.add(new BuildingEntry(id, ownerId, buildingType, col, row));
+                    int hp = map.get("hp") instanceof Number number ? number.intValue() : 0;
+                    int maxHp = map.get("maxHp") instanceof Number number ? number.intValue() : 0;
+                    String townHallLevel = (String) map.get("townHallLevel");
+                    String producingKind = (String) map.get("producingKind");
+                    String producingTarget = (String) map.get("producingTarget");
+                    int turnsRemaining = map.get("turnsRemaining") instanceof Number number ? number.intValue() : 0;
+                    buildings.add(new BuildingEntry(id, ownerId, buildingType, col, row, hp, maxHp,
+                            townHallLevel, producingKind, producingTarget, turnsRemaining));
                 }
             }
         }
 
-        return new GameStateSnapshotMessage(rows, cols, tiles, units, buildings, timestamp);
+        Map<String, Integer> yourResources = new LinkedHashMap<>();
+        if (payload.get("yourResources") instanceof Map<?, ?> resourceMap) {
+            for (Map.Entry<?, ?> entry : resourceMap.entrySet()) {
+                if (entry.getValue() instanceof Number number) {
+                    yourResources.put((String) entry.getKey(), number.intValue());
+                }
+            }
+        }
+
+        List<String> yourTechs = new ArrayList<>();
+        if (payload.get("yourTechs") instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof String s) {
+                    yourTechs.add(s);
+                }
+            }
+        }
+
+        Map<String, Integer> yourItems = new LinkedHashMap<>();
+        if (payload.get("yourItems") instanceof Map<?, ?> itemMap) {
+            for (Map.Entry<?, ?> entry : itemMap.entrySet()) {
+                if (entry.getValue() instanceof Number number) {
+                    yourItems.put((String) entry.getKey(), number.intValue());
+                }
+            }
+        }
+
+        return new GameStateSnapshotMessage(rows, cols, tiles, units, buildings, yourResources, yourTechs, yourItems, timestamp);
     }
 
-    public record TileEntry(int col, int row, String terrain, Map<String, Integer> resources) {
+    public record TileEntry(int col, int row, String terrain, Map<String, Integer> resources, boolean visible) {
     }
 
-    public record UnitEntry(int id, String ownerId, String unitType, int col, int row, int currentAP) {
+    public record UnitEntry(int id, String ownerId, String unitType, int col, int row, int currentAP, int hp) {
     }
 
-    public record BuildingEntry(int id, String ownerId, String buildingType, int col, int row) {
+    public record BuildingEntry(int id, String ownerId, String buildingType, int col, int row, int hp, int maxHp,
+                                 String townHallLevel, String producingKind, String producingTarget, int turnsRemaining) {
     }
 }
